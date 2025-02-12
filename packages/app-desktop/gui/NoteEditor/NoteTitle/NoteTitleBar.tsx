@@ -1,10 +1,11 @@
 import * as React from 'react';
 import { _ } from '@joplin/lib/locale';
 import CommandService from '@joplin/lib/services/CommandService';
-import { ChangeEvent, useCallback, useRef } from 'react';
+import { ChangeEvent, useCallback, useContext, useRef } from 'react';
 import NoteToolbar from '../../NoteToolbar/NoteToolbar';
 import { buildStyle } from '@joplin/lib/theme';
 import time from '@joplin/lib/time';
+import { WindowIdContext } from '../../NewWindowOrIFrame';
 
 interface Props {
 	themeId: number;
@@ -84,7 +85,12 @@ export default function NoteTitleBar(props: Props) {
 	const onTitleKeydown: React.KeyboardEventHandler<HTMLInputElement> = useCallback((event) => {
 		const titleElement = event.currentTarget;
 		const selectionAtEnd = titleElement.selectionEnd === titleElement.value.length;
-		if ((event.key === 'ArrowDown' && selectionAtEnd) || event.key === 'Enter') {
+		const isNavigationShortcut = (event.key === 'ArrowDown' && selectionAtEnd) || (event.key === 'Enter' && !event.shiftKey);
+		const composing = event.nativeEvent.isComposing;
+
+		// Don't change focus if the navigation shortcut is fired during composition. See
+		// https://github.com/laurent22/joplin/issues/11485.
+		if (!composing && isNavigationShortcut) {
 			event.preventDefault();
 			const moveCursorToStart = event.key === 'ArrowDown';
 			void CommandService.instance().execute('focusElement', 'noteBody', { moveCursorToStart });
@@ -97,11 +103,14 @@ export default function NoteTitleBar(props: Props) {
 		return <span className="updated-time-label" style={styles.titleDate}>{time.formatMsToLocal(props.noteUserUpdatedTime)}</span>;
 	}
 
+	const windowId = useContext(WindowIdContext);
+
 	function renderNoteToolbar() {
 		return <NoteToolbar
 			themeId={props.themeId}
 			style={styles.toolbarStyle}
 			disabled={props.disabled}
+			windowId={windowId}
 		/>;
 	}
 
@@ -112,6 +121,7 @@ export default function NoteTitleBar(props: Props) {
 				type="text"
 				ref={props.titleInputRef}
 				placeholder={props.isProvisional ? (props.noteIsTodo ? _('Creating new to-do...') : _('Creating new note...')) : ''}
+				aria-label={props.isProvisional ? undefined : _('Note title')}
 				style={styles.titleInput}
 				readOnly={props.disabled}
 				onChange={props.onTitleChange}
