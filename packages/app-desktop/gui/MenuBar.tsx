@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { AppState } from '../app.reducer';
 import InteropService from '@joplin/lib/services/interop/InteropService';
-import { stateUtils } from '@joplin/lib/reducer';
+import { defaultWindowId, stateUtils } from '@joplin/lib/reducer';
 import CommandService from '@joplin/lib/services/CommandService';
 import MenuUtils from '@joplin/lib/services/commands/MenuUtils';
 import KeymapService from '@joplin/lib/services/KeymapService';
@@ -19,7 +19,7 @@ import menuCommandNames from './menuCommandNames';
 import stateToWhenClauseContext from '../services/commands/stateToWhenClauseContext';
 import bridge from '../services/bridge';
 import checkForUpdates from '../checkForUpdates';
-const { connect } = require('react-redux');
+import { connect } from 'react-redux';
 import { reg } from '@joplin/lib/registry';
 import { ProfileConfig } from '@joplin/lib/services/profileConfig/types';
 import PluginService, { PluginSettings } from '@joplin/lib/services/plugins/PluginService';
@@ -27,6 +27,11 @@ import { getListRendererById, getListRendererIds } from '@joplin/lib/services/no
 import useAsyncEffect from '@joplin/lib/hooks/useAsyncEffect';
 import { EventName } from '@joplin/lib/eventManager';
 import { ipcRenderer } from 'electron';
+import NavService from '@joplin/lib/services/NavService';
+import Logger from '@joplin/utils/Logger';
+
+const logger = Logger.create('MenuBar');
+
 const packageInfo: PackageInfo = require('../packageInfo.js');
 const { clipboard } = require('electron');
 const Menu = bridge().Menu;
@@ -150,7 +155,7 @@ interface Props {
 	dispatch: Function;
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
 	menuItemProps: any;
-	routeName: string;
+	mainScreenVisible: boolean;
 	selectedFolderId: string;
 	layoutButtonSequence: number;
 	['notes.sortOrder.field']: string;
@@ -160,6 +165,7 @@ interface Props {
 	showNoteCounts: boolean;
 	uncompletedTodosOnTop: boolean;
 	showCompletedTodos: boolean;
+	tabMovesFocus: boolean;
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
 	pluginMenuItems: any[];
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
@@ -173,6 +179,8 @@ interface Props {
 	pluginSettings: PluginSettings;
 	noteListRendererIds: string[];
 	noteListRendererId: string;
+	windowId: string;
+	secondaryWindowFocused: boolean;
 	showMenuBar: boolean;
 }
 
@@ -192,11 +200,11 @@ function menuItemSetEnabled(id: string, enabled: boolean) {
 	menuItem.enabled = enabled;
 }
 
-const applyMenuBarVisibility = (showMenuBar: boolean) => {
+const applyMenuBarVisibility = (windowId: string, showMenuBar: boolean) => {
 	// The menu bar cannot be hidden on macOS
 	if (shim.isMac()) return;
 
-	const window = bridge().window();
+	const window = bridge().windowById(windowId) ?? bridge().mainWindow();
 	window.setAutoHideMenuBar(!showMenuBar);
 	window.setMenuBarVisibility(showMenuBar);
 };
@@ -249,6 +257,7 @@ function useMenuStates(menu: any, props: Props) {
 			menuItemSetChecked('showNoteCounts', props.showNoteCounts);
 			menuItemSetChecked('uncompletedTodosOnTop', props.uncompletedTodosOnTop);
 			menuItemSetChecked('showCompletedTodos', props.showCompletedTodos);
+			menuItemSetChecked('toggleTabMovesFocus', props.tabMovesFocus);
 		}
 
 		timeoutId = setTimeout(scheduleUpdate, 150);
@@ -269,6 +278,7 @@ function useMenuStates(menu: any, props: Props) {
 		props['notes.sortOrder.reverse'],
 		// eslint-disable-next-line @seiyab/react-hooks/exhaustive-deps -- Old code before rule was applied
 		props['folders.sortOrder.reverse'],
+		props.tabMovesFocus,
 		props.noteListRendererId,
 		props.showNoteCounts,
 		props.uncompletedTodosOnTop,
@@ -402,6 +412,17 @@ function useMenu(props: Props) {
 
 			const keymapService = KeymapService.instance();
 
+			const navigateTo = (routeName: string) => {
+				void NavService.go(routeName);
+
+				// NavService.go opens in the main window -- switch to it to show the screen:
+				const isBackgroundWindow = props.windowId !== defaultWindowId;
+				if (isBackgroundWindow) {
+					logger.info('Focusing the main window');
+					bridge().mainWindow().show();
+				}
+			};
+
 			const quitMenuItem = {
 				label: _('Quit'),
 				accelerator: keymapService.getAccelerator('quit'),
@@ -458,6 +479,7 @@ function useMenu(props: Props) {
 				menuItemDic.focusElementNoteList,
 				menuItemDic.focusElementNoteTitle,
 				menuItemDic.focusElementNoteBody,
+				menuItemDic.focusElementToolbar,
 			];
 
 			const importItems = [];
@@ -515,10 +537,7 @@ function useMenu(props: Props) {
 			const syncStatusItem = {
 				label: _('Synchronisation Status'),
 				click: () => {
-					props.dispatch({
-						type: 'NAV_GO',
-						routeName: 'Status',
-					});
+					navigateTo('Status');
 				},
 			};
 
@@ -548,10 +567,7 @@ function useMenu(props: Props) {
 					label: _('Options'),
 					accelerator: keymapService.getAccelerator('config'),
 					click: () => {
-						props.dispatch({
-							type: 'NAV_GO',
-							routeName: 'Config',
-						});
+						navigateTo('Config');
 					},
 				},
 				separator(),
@@ -561,10 +577,7 @@ function useMenu(props: Props) {
 			const toolsItemsAll = [{
 				label: _('Note attachments...'),
 				click: () => {
-					props.dispatch({
-						type: 'NAV_GO',
-						routeName: 'Resources',
-					});
+					navigateTo('Resources');
 				},
 			}];
 
@@ -579,7 +592,7 @@ function useMenu(props: Props) {
 				if (Setting.value('featureFlag.autoUpdaterServiceEnabled')) {
 					ipcRenderer.send('check-for-updates');
 				} else {
-					void checkForUpdates(false, bridge().window(), { includePreReleases: Setting.value('autoUpdate.includePreReleases') });
+					void checkForUpdates(false, bridge().mainWindow(), { includePreReleases: Setting.value('autoUpdate.includePreReleases') });
 				}
 
 			}
@@ -619,10 +632,7 @@ function useMenu(props: Props) {
 					visible: !!shim.isMac(),
 					accelerator: shim.isMac() && keymapService.getAccelerator('config'),
 					click: () => {
-						props.dispatch({
-							type: 'NAV_GO',
-							routeName: 'Config',
-						});
+						navigateTo('Config');
 					},
 				}, {
 					label: _('Check for updates...'),
@@ -819,6 +829,12 @@ function useMenu(props: Props) {
 						},
 						separator(),
 						{
+							...menuItemDic['toggleTabMovesFocus'],
+							label: Setting.settingMetadata('editor.tabMovesFocus').label(),
+							type: 'checkbox',
+						},
+						separator(),
+						{
 							label: _('Actual Size'),
 							click: () => {
 								Setting.setValue('windowContentZoomFactor', 100);
@@ -871,7 +887,9 @@ function useMenu(props: Props) {
 				note: {
 					label: _('&Note'),
 					submenu: [
+						menuItemDic.openNoteInNewWindow,
 						menuItemDic.toggleExternalEditing,
+						separator(),
 						menuItemDic.setTags,
 						menuItemDic.showShareNoteDialog,
 						separator(),
@@ -914,8 +932,8 @@ function useMenu(props: Props) {
 						label: _('Joplin Forum'),
 						click() { void bridge().openExternal('https://discourse.joplinapp.org'); },
 					}, {
-						label: _('Join us on Twitter'),
-						click() { void bridge().openExternal('https://twitter.com/joplinapp'); },
+						label: _('Join us on %s', 'Bluesky'),
+						click() { void bridge().openExternal('https://bsky.app/profile/joplinapp.bsky.social'); },
 					}, {
 						label: _('Make a donation'),
 						click() { void bridge().openExternal('https://joplinapp.org/donate/'); },
@@ -927,6 +945,7 @@ function useMenu(props: Props) {
 					separator(),
 					syncStatusItem,
 					separator(),
+					menuItemDic.exportDeletionLog,
 					{
 						id: 'help:toggleDevTools',
 						label: _('Toggle development tools'),
@@ -1019,7 +1038,7 @@ function useMenu(props: Props) {
 				rootMenus.help,
 			].filter(item => item !== null);
 
-			if (props.routeName !== 'Main') {
+			if (!props.mainScreenVisible) {
 				setMenu(Menu.buildFromTemplate([
 					{
 						label: _('&File'),
@@ -1049,7 +1068,8 @@ function useMenu(props: Props) {
 		};
 		// eslint-disable-next-line @seiyab/react-hooks/exhaustive-deps -- Old code before rule was applied
 	}, [
-		props.routeName,
+		props.windowId,
+		props.mainScreenVisible,
 		props.pluginMenuItems,
 		props.pluginMenus,
 		keymapLastChangeTime,
@@ -1099,24 +1119,43 @@ function useMenu(props: Props) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
 function MenuBar(props: Props): any {
 	const menu = useMenu(props);
-	if (menu) Menu.setApplicationMenu(menu);
-	applyMenuBarVisibility(props.showMenuBar);
+
+	useEffect(() => {
+		// Currently, this sets the menu for all windows. Although it's possible to set the menu
+		// for individual windows with BrowserWindow.setMenu, it causes issues with updating the
+		// state of existing menu items (and doesn't work with MacOS/Playwright).
+		if (menu) {
+			Menu.setApplicationMenu(menu);
+		}
+	}, [menu]);
+
+	useEffect(() => {
+		applyMenuBarVisibility(props.windowId, props.showMenuBar);
+	}, [props.showMenuBar, props.windowId]);
+
 	return null;
 }
 
-const mapStateToProps = (state: AppState) => {
+
+const mapStateToProps = (state: AppState): Partial<Props> => {
 	const whenClauseContext = stateToWhenClauseContext(state);
 
+	const secondaryWindowFocused = state.windowId !== defaultWindowId;
+
 	return {
+		windowId: state.windowId,
 		menuItemProps: menuUtils.commandsToMenuItemProps(commandNames.concat(getPluginCommandNames(state.pluginService.plugins)), whenClauseContext),
 		locale: state.settings.locale,
-		routeName: state.route.routeName,
+		// Secondary windows can only show the main screen
+		mainScreenVisible: state.route.routeName === 'Main' || secondaryWindowFocused,
+
 		selectedFolderId: state.selectedFolderId,
 		layoutButtonSequence: state.settings.layoutButtonSequence,
 		['notes.sortOrder.field']: state.settings['notes.sortOrder.field'],
 		['folders.sortOrder.field']: state.settings['folders.sortOrder.field'],
 		['notes.sortOrder.reverse']: state.settings['notes.sortOrder.reverse'],
 		['folders.sortOrder.reverse']: state.settings['folders.sortOrder.reverse'],
+		tabMovesFocus: state.settings['editor.tabMovesFocus'],
 		pluginSettings: state.settings['plugins.states'],
 		showNoteCounts: state.settings.showNoteCounts,
 		uncompletedTodosOnTop: state.settings.uncompletedTodosOnTop,
@@ -1126,7 +1165,7 @@ const mapStateToProps = (state: AppState) => {
 		['spellChecker.languages']: state.settings['spellChecker.languages'],
 		['spellChecker.enabled']: state.settings['spellChecker.enabled'],
 		plugins: state.pluginService.plugins,
-		customCss: state.customCss,
+		customCss: state.customViewerCss,
 		profileConfig: state.profileConfig,
 		noteListRendererIds: state.noteListRendererIds,
 		noteListRendererId: state.settings['notes.listRendererId'],

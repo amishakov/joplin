@@ -1,21 +1,19 @@
 import * as React from 'react';
 import { _ } from '@joplin/lib/locale';
 import { themeStyle } from '@joplin/lib/theme';
-import time from '@joplin/lib/time';
-const Datetime = require('react-datetime').default;
 import CreatableSelect from 'react-select/creatable';
 import Select from 'react-select';
 import makeAnimated from 'react-select/animated';
 import { focus } from '@joplin/lib/utils/focusHandler';
 import Dialog from './Dialog';
+import { ChangeEvent } from 'react';
+import { formatDateTimeLocalToMs, isValidDate } from '@joplin/utils/time';
 
 interface Props {
 	themeId: number;
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
 	defaultValue: any;
 	visible: boolean;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
-	style: any;
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
 	buttons: any[];
 	// eslint-disable-next-line @typescript-eslint/ban-types -- Old code before rule was applied
@@ -82,8 +80,8 @@ export default class PromptDialog extends React.Component<Props, any> {
 		this.focusInput_ = false;
 	}
 
-	public styles(themeId: number, width: number, height: number, visible: boolean) {
-		const styleKey = `${themeId}_${width}_${height}_${visible}`;
+	public styles(themeId: number, visible: boolean) {
+		const styleKey = `${themeId}_${visible}`;
 		if (styleKey === this.styleKey_) return this.styles_;
 
 		const theme = themeStyle(themeId);
@@ -111,7 +109,7 @@ export default class PromptDialog extends React.Component<Props, any> {
 		};
 
 		this.styles_.input = {
-			width: 0.5 * width,
+			width: 'calc(0.5 * var(--prompt-width))',
 			maxWidth: 400,
 			color: theme.color,
 			backgroundColor: theme.backgroundColor,
@@ -123,8 +121,8 @@ export default class PromptDialog extends React.Component<Props, any> {
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
 			control: (provided: any) => {
 				return { ...provided,
-					minWidth: width * 0.2,
-					maxWidth: width * 0.5,
+					minWidth: 'calc(var(--prompt-width) * 0.2)',
+					maxWidth: 'calc(var(--prompt-width) * 0.5)',
 					fontFamily: theme.fontFamily,
 				};
 			},
@@ -191,34 +189,29 @@ export default class PromptDialog extends React.Component<Props, any> {
 
 		this.styles_.desc = { ...theme.textStyle, marginTop: 10 };
 
-		this.styles_.dialog = { maxWidth: width };
-
 		return this.styles_;
 	}
 
 	public render() {
 		if (!this.state.visible) return null;
 
-		const style = this.props.style;
 		const theme = themeStyle(this.props.themeId);
 		const buttonTypes = this.props.buttons ? this.props.buttons : ['ok', 'cancel'];
 
-		const styles = this.styles(this.props.themeId, style.width, style.height, this.state.visible);
+		const styles = this.styles(this.props.themeId, this.state.visible);
 
 		const onClose = (accept: boolean, buttonType: string = null) => {
 			if (this.props.onClose) {
 				let outputAnswer = this.state.answer;
 				if (this.props.inputType === 'datetime') {
-					// outputAnswer = anythingToDate(outputAnswer);
-					outputAnswer = time.anythingToDateTime(outputAnswer);
+					outputAnswer = isValidDate(outputAnswer) ? formatDateTimeLocalToMs(outputAnswer) : null;
 				}
 				this.props.onClose(accept ? outputAnswer : null, buttonType);
 			}
 			this.setState({ visible: false, answer: '' });
 		};
 
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
-		const onChange = (event: any) => {
+		const onChange = (event: ChangeEvent<HTMLInputElement>) => {
 			this.setState({ answer: event.target.value });
 		};
 
@@ -230,11 +223,6 @@ export default class PromptDialog extends React.Component<Props, any> {
 		// 	m = moment(o, time.dateFormat());
 		// 	return m.isValid() ? m.toDate() : null;
 		// }
-
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
-		const onDateTimeChange = (momentObject: any) => {
-			this.setState({ answer: momentObject });
-		};
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
 		const onSelectChange = (newValue: any) => {
@@ -263,8 +251,13 @@ export default class PromptDialog extends React.Component<Props, any> {
 		let inputComp = null;
 
 		if (this.props.inputType === 'datetime') {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
-			inputComp = <Datetime className="datetime-picker" value={this.state.answer} inputProps={{ style: styles.input }} dateFormat={time.dateFormat()} timeFormat={time.timeFormat()} onChange={(momentObject: any) => onDateTimeChange(momentObject)} />;
+			inputComp = <input
+				defaultValue={this.state.answer}
+				onChange={onChange}
+				type="datetime-local"
+				className='datetime-picker'
+				style={styles.input}
+			/>;
 		} else if (this.props.inputType === 'tags') {
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
 			inputComp = <CreatableSelect className="tag-selector" onMenuOpen={this.select_menuOpen} onMenuClose={this.select_menuClose} styles={styles.select} theme={styles.selectTheme} ref={this.answerInput_} value={this.state.answer} placeholder="" components={makeAnimated()} isMulti={true} isClearable={false} backspaceRemovesValue={true} options={this.props.autocomplete} onChange={onSelectChange} onKeyDown={(event: any) => onKeyDown(event)} />;

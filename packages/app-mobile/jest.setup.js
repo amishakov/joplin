@@ -55,6 +55,10 @@ jest.mock('./components/ExtendedWebView', () => {
 	return require('./components/ExtendedWebView/index.jest.js');
 });
 
+jest.mock('./components/CameraView/Camera', () => {
+	return require('./components/CameraView/Camera/index.jest');
+});
+
 jest.mock('@react-native-clipboard/clipboard', () => {
 	return { default: { getString: jest.fn(), setString: jest.fn() } };
 });
@@ -65,6 +69,8 @@ const emptyMockPackages = [
 	'react-native-image-picker',
 	'react-native-document-picker',
 	'@joplin/react-native-saf-x',
+	'expo-av',
+	'expo-av/build/Audio',
 ];
 for (const packageName of emptyMockPackages) {
 	jest.doMock(packageName, () => {
