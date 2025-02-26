@@ -5,7 +5,8 @@ import createTheme from './theme';
 import { EditorState } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { GFM as GitHubFlavoredMarkdownExtension } from '@lezer/markdown';
-import { MarkdownMathExtension } from './markdown/markdownMathParser';
+import MarkdownMathExtension from './markdown/MarkdownMathExtension';
+import MarkdownHighlightExtension from './markdown/MarkdownHighlightExtension';
 import lookUpLanguage from './markdown/codeBlockLanguages/lookUpLanguage';
 import { html } from '@codemirror/lang-html';
 import { defaultKeymap, emacsStyleKeymap } from '@codemirror/commands';
@@ -24,6 +25,8 @@ const configFromSettings = (settings: EditorSettings) => {
 					extensions: [
 						GitHubFlavoredMarkdownExtension,
 
+						settings.markdownMarkEnabled ? MarkdownHighlightExtension : [],
+
 						// Don't highlight KaTeX if the user disabled it
 						settings.katexEnabled ? MarkdownMathExtension : [],
 					],
@@ -37,9 +40,7 @@ const configFromSettings = (settings: EditorSettings) => {
 						htmlTagLanguage: html({ matchClosingTags: false, autoCloseTags: false }),
 					}),
 				}),
-				markdownLanguage.data.of({
-					closeBrackets: openingBrackets,
-				}),
+				markdownLanguage.data.of({ closeBrackets: { brackets: openingBrackets } }),
 			];
 		} else if (language === EditorLanguageType.Html) {
 			return html({ autoCloseTags: settings.autocompleteMarkup });
@@ -56,6 +57,7 @@ const configFromSettings = (settings: EditorSettings) => {
 			autocapitalize: 'sentence',
 			autocorrect: settings.spellcheckEnabled ? 'true' : 'false',
 			spellcheck: settings.spellcheckEnabled ? 'true' : 'false',
+			'aria-label': settings.editorLabel,
 		}),
 		EditorState.readOnly.of(settings.readOnly),
 		indentUnit.of(settings.indentWithTabs ? '\t' : '    '),

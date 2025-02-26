@@ -85,9 +85,9 @@ async function main() {
 		'codemirror/addon/dialog/dialog.css',
 		'codemirror/lib/codemirror.css',
 		'mark.js/dist/mark.min.js',
-		'react-datetime/css/react-datetime.css',
 		'roboto-fontface/css/roboto/roboto-fontface.css',
 		'smalltalk/css/smalltalk.css',
+		'smalltalk/dist/smalltalk.min.js',
 		'smalltalk/img/IDR_CLOSE_DIALOG_H.png',
 		'smalltalk/img/IDR_CLOSE_DIALOG.png',
 		{

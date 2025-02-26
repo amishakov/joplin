@@ -4,7 +4,7 @@ import { _ } from '@joplin/lib/locale';
 import DialogButtonRow from './DialogButtonRow';
 const { themeStyle } = require('@joplin/lib/theme');
 const Countable = require('@joplin/lib/countable/Countable');
-import markupLanguageUtils from '../utils/markupLanguageUtils';
+import markupLanguageUtils from '@joplin/lib/utils/markupLanguageUtils';
 import Dialog from './Dialog';
 
 interface NoteContentPropertiesDialogProps {
@@ -38,7 +38,7 @@ function countElements(text: string, wordSetter: Function, characterSetter: Func
 		characterSetter(counter.all);
 		characterNoSpaceSetter(counter.characters);
 	});
-	text === '' ? lineSetter(0) : lineSetter(text.split('\n').length);
+	lineSetter(text === '' ? 0 : text.split('\n').length);
 }
 
 function formatReadTime(readTimeMinutes: number) {

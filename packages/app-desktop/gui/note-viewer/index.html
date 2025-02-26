@@ -377,6 +377,20 @@
 			contentElement.scrollTop = scrollTop;
 		}
 
+		const rewriteFileUrls = (accessKey) => {
+			if (!accessKey) return;
+
+			// To allow accessing local files from the viewer's non-file URL, file:// URLs are re-written
+			// to joplin-content:// URLs:
+			const mediaElements = document.querySelectorAll('video[src], audio[src], source[src], img[src]');
+			for (const element of mediaElements) {
+				if (element.src?.startsWith('file:')) {
+					const newUrl = element.src.replace(/^file:\/\//, 'joplin-content://file-media/');
+					element.src = `${newUrl}?access-key=${accessKey}`;
+				}
+			}
+		};
+
 		ipc.setHtml = (event) => {
 			const html = event.html;
 
@@ -388,6 +402,10 @@
 
 			contentElement.innerHTML = html;
 
+			if (html.includes('file://')) {
+				rewriteFileUrls(event.options.mediaAccessKey);
+			}
+
 			scrollmap.create(event.options.markupLineCount);
 			if (typeof event.options.percent !== 'number') {
 				restorePercentScroll(); // First, a quick treatment is applied.
@@ -396,6 +414,12 @@
 			}
 
 			addPluginAssets(event.options.pluginAssets);
+
+			if (event.options.increaseControlSize) {
+				document.documentElement.classList.add('-larger-controls');
+			} else {
+				document.documentElement.classList.remove('-larger-controls');
+			}
 
 			if (event.options.downloadResources === 'manual') {
 				webviewLib.setupResourceManualDownload();

@@ -3,6 +3,7 @@ import { NoteEntity, ResourceEntity } from './services/database/types';
 import type FsDriverBase from './fs-driver-base';
 import type FileApiDriverLocal from './file-api-driver-local';
 import { Crypto } from './services/e2ee/types';
+import { MarkupLanguage } from '@joplin/renderer';
 
 export interface CreateResourceFromPathOptions {
 	resizeLargeImages?: 'always' | 'never' | 'ask';
@@ -31,6 +32,26 @@ interface FetchOptions {
 	headers?: Record<string, string>;
 	body?: string;
 	agent?: unknown;
+}
+
+interface AttachFileToNoteOptions {
+	resizeLargeImages?: 'always'|'never';
+	position?: number;
+	markupLanguage?: MarkupLanguage;
+}
+
+export enum MessageBoxType {
+	Confirm = 'question',
+	Error = 'error',
+	Info = 'info',
+}
+
+export interface ShowMessageBoxOptions {
+	title?: string;
+	buttons?: string[];
+	type?: MessageBoxType;
+	defaultId?: number;
+	cancelId?: number;
 }
 
 let isTestingEnv_ = false;
@@ -278,6 +299,10 @@ const shim = {
 		throw new Error('Not implemented: fsDriver');
 	},
 
+	sharpEnabled: (): boolean => {
+		return true;
+	},
+
 	FileApiDriverLocal: null as typeof FileApiDriverLocal,
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
@@ -308,8 +333,7 @@ const shim = {
 	// eslint-disable-next-line @typescript-eslint/ban-types -- Old code before rule was applied
 	detectAndSetLocale: null as Function,
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
-	attachFileToNote: async (_note: any, _filePath: string): Promise<NoteEntity> => {
+	attachFileToNote: async (_note: NoteEntity, _filePath: string, _options?: AttachFileToNoteOptions): Promise<NoteEntity> => {
 		throw new Error('Not implemented: attachFileToNote');
 	},
 
@@ -391,13 +415,16 @@ const shim = {
 	// Returns the index of the button that was clicked. By default,
 	// 0 -> OK
 	// 1 -> Cancel
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
-	showMessageBox: (_message: string, _options: any = null): Promise<number> => {
+	showMessageBox: (_message: string, _options: ShowMessageBoxOptions = null): Promise<number> => {
 		throw new Error('Not implemented');
 	},
 
+	showErrorDialog: async (message: string): Promise<void> => {
+		await shim.showMessageBox(message, { type: MessageBoxType.Error });
+	},
+
 	showConfirmationDialog: async (message: string): Promise<boolean> => {
-		return await shim.showMessageBox(message) === 0;
+		return await shim.showMessageBox(message, { type: MessageBoxType.Confirm }) === 0;
 	},
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied

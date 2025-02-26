@@ -40,7 +40,7 @@ const HeaderItem: React.FC<Props> = props => {
 				new MenuItem(menuUtils.commandToStatefulMenuItem('newFolder')),
 			);
 
-			menu.popup({ window: bridge().window() });
+			menu.popup({ window: bridge().activeWindow() });
 		}
 	}, [itemId]);
 
@@ -59,7 +59,7 @@ const HeaderItem: React.FC<Props> = props => {
 			onDrop={props.onDrop}
 		>
 			<StyledHeader onClick={onClick}>
-				<StyledHeaderIcon aria-label='' role='img' className={item.iconName}/>
+				<StyledHeaderIcon aria-hidden='true' role='img' className={item.iconName}/>
 				<StyledHeaderLabel>{item.label}</StyledHeaderLabel>
 			</StyledHeader>
 		</ListItemWrapper>

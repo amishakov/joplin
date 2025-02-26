@@ -19,7 +19,6 @@ import SpellCheckerService from '@joplin/lib/services/spellChecker/SpellCheckerS
 import SpellCheckerServiceDriverNative from './services/spellChecker/SpellCheckerServiceDriverNative';
 import bridge from './services/bridge';
 import menuCommandNames from './gui/menuCommandNames';
-import stateToWhenClauseContext from './services/commands/stateToWhenClauseContext';
 import ResourceService from '@joplin/lib/services/ResourceService';
 import ExternalEditWatcher from '@joplin/lib/services/ExternalEditWatcher';
 import appReducer, { createAppDefaultState } from './app.reducer';
@@ -29,35 +28,21 @@ import { reg } from '@joplin/lib/registry';
 const packageInfo: PackageInfo = require('./packageInfo.js');
 import DecryptionWorker from '@joplin/lib/services/DecryptionWorker';
 import ClipperServer from '@joplin/lib/ClipperServer';
-import { ipcRenderer, webFrame } from 'electron';
+import { ipcRenderer } from 'electron';
 const Menu = bridge().Menu;
 const PluginManager = require('@joplin/lib/services/PluginManager');
 import RevisionService from '@joplin/lib/services/RevisionService';
 import MigrationService from '@joplin/lib/services/MigrationService';
-import { loadCustomCss, injectCustomStyles } from '@joplin/lib/CssUtils';
-import mainScreenCommands from './gui/MainScreen/commands/index';
-import noteEditorCommands from './gui/NoteEditor/commands/index';
-import noteListCommands from './gui/NoteList/commands/index';
-import noteListControlsCommands from './gui/NoteListControls/commands/index';
-import sidebarCommands from './gui/Sidebar/commands/index';
-import appCommands from './commands/index';
-import libCommands from '@joplin/lib/commands/index';
+import { loadCustomCss } from '@joplin/lib/CssUtils';
 import { homedir } from 'os';
 import getDefaultPluginsInfo from '@joplin/lib/services/plugins/defaultPlugins/desktopDefaultPluginsInfo';
 const electronContextMenu = require('./services/electron-context-menu');
 // import  populateDatabase from '@joplin/lib/services/debug/populateDatabase';
 
-const commands = mainScreenCommands
-	.concat(noteEditorCommands)
-	.concat(noteListCommands)
-	.concat(noteListControlsCommands)
-	.concat(sidebarCommands);
 
 // Commands that are not tied to any particular component.
 // The runtime for these commands can be loaded when the app starts.
-const globalCommands = appCommands.concat(libCommands);
 
-import editorCommandDeclarations from './gui/NoteEditor/editorCommandDeclarations';
 import PerFolderSortOrderService from './services/sortOrder/PerFolderSortOrderService';
 import ShareService from '@joplin/lib/services/share/ShareService';
 import checkForUpdates from './checkForUpdates';
@@ -74,6 +59,7 @@ import SearchEngine from '@joplin/lib/services/search/SearchEngine';
 import { PackageInfo } from '@joplin/lib/versionInfo';
 import { CustomProtocolHandler } from './utils/customProtocols/handleCustomProtocols';
 import { refreshFolders } from '@joplin/lib/folders-screen-utils';
+import initializeCommandService from './utils/initializeCommandService';
 
 const pluginClasses = [
 	require('./plugins/GotoAnything').default,
@@ -137,6 +123,12 @@ class Application extends BaseApplication {
 			this.updateLanguage();
 		}
 
+		if (action.type === 'SETTING_UPDATE_ONE' && action.key === 'renderer.fileUrls' || action.type === 'SETTING_UPDATE_ALL') {
+			bridge().electronApp().getCustomProtocolHandler().setMediaAccessEnabled(
+				Setting.value('renderer.fileUrls'),
+			);
+		}
+
 		if (action.type === 'SETTING_UPDATE_ONE' && action.key === 'showTrayIcon' || action.type === 'SETTING_UPDATE_ALL') {
 			this.updateTray();
 		}
@@ -145,12 +137,8 @@ class Application extends BaseApplication {
 			void this.setupOcrService();
 		}
 
-		if (action.type === 'SETTING_UPDATE_ONE' && action.key === 'style.editor.fontFamily' || action.type === 'SETTING_UPDATE_ALL') {
-			this.updateEditorFont();
-		}
-
 		if (action.type === 'SETTING_UPDATE_ONE' && action.key === 'windowContentZoomFactor' || action.type === 'SETTING_UPDATE_ALL') {
-			webFrame.setZoomFactor(Setting.value('windowContentZoomFactor') / 100);
+			bridge().setZoomFactor(Setting.value('windowContentZoomFactor') / 100);
 		}
 
 		if (action.type === 'SETTING_UPDATE_ONE' && action.key === 'linking.extraAllowedExtensions' || action.type === 'SETTING_UPDATE_ALL') {
@@ -212,29 +200,12 @@ class Application extends BaseApplication {
 			app.destroyTray();
 		} else {
 			const contextMenu = Menu.buildFromTemplate([
-				{ label: _('Open %s', app.electronApp().name), click: () => { app.window().show(); } },
+				{ label: _('Open %s', app.electronApp().name), click: () => { app.mainWindow().show(); } },
 				{ type: 'separator' },
 				{ label: _('Quit'), click: () => { void app.quit(); } },
 			]);
 			app.createTray(contextMenu);
 		}
-	}
-
-	public updateEditorFont() {
-		const fontFamilies = [];
-		if (Setting.value('style.editor.fontFamily')) fontFamilies.push(`"${Setting.value('style.editor.fontFamily')}"`);
-		fontFamilies.push('\'Avenir Next\', Avenir, Arial, sans-serif');
-
-		// The '*' and '!important' parts are necessary to make sure Russian text is displayed properly
-		// https://github.com/laurent22/joplin/issues/155
-		//
-		// Note: Be careful about the specificity here. Incorrect specificity can break monospaced fonts in tables.
-
-		const css = `.CodeMirror5 *, .cm-editor .cm-content { font-family: ${fontFamilies.join(', ')} !important; }`;
-		const styleTag = document.createElement('style');
-		styleTag.type = 'text/css';
-		styleTag.appendChild(document.createTextNode(css));
-		document.head.appendChild(styleTag);
 	}
 
 	public setupContextMenu() {
@@ -424,6 +395,23 @@ class Application extends BaseApplication {
 		}
 	}
 
+	private async setupCustomCss() {
+		const chromeCssPath = Setting.customCssFilePath(Setting.customCssFilenames.JOPLIN_APP);
+		if (await shim.fsDriver().exists(chromeCssPath)) {
+			this.store().dispatch({
+				// Main window custom CSS
+				type: 'CUSTOM_CHROME_CSS_ADD',
+				filePath: chromeCssPath,
+			});
+		}
+
+		this.store().dispatch({
+			// Markdown preview pane
+			type: 'CUSTOM_VIEWER_CSS_APPEND',
+			css: await loadCustomCss(Setting.customCssFilePath(Setting.customCssFilenames.RENDERED_MARKDOWN)),
+		});
+	}
+
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
 	public async start(argv: string[], startOptions: StartOptions = null): Promise<any> {
 		// If running inside a package, the command line, instead of being "node.exe <path> <flags>" is "joplin.exe <flags>" so
@@ -438,7 +426,7 @@ class Application extends BaseApplication {
 
 		if (Setting.value('sync.upgradeState') === Setting.SYNC_UPGRADE_STATE_MUST_DO) {
 			reg.logger().info('app.start: doing upgradeSyncTarget action');
-			bridge().window().show();
+			bridge().mainWindow().show();
 			return { action: 'upgradeSyncTarget' };
 		}
 
@@ -455,9 +443,6 @@ class Application extends BaseApplication {
 			syncDebugLog.enabled = true;
 			syncDebugLog.info(`Profile dir: ${dir}`);
 		}
-
-		// Loads app-wide styles. (Markdown preview-specific styles loaded in app.js)
-		await injectCustomStyles('appStyles', Setting.customCssFilePath(Setting.customCssFilenames.JOPLIN_APP));
 
 		this.setupAutoUpdaterService();
 
@@ -493,20 +478,7 @@ class Application extends BaseApplication {
 
 		PerFolderSortOrderService.initialize();
 
-		CommandService.instance().initialize(this.store(), Setting.value('env') === 'dev', stateToWhenClauseContext);
-
-		for (const command of commands) {
-			CommandService.instance().registerDeclaration(command.declaration);
-		}
-
-		for (const command of globalCommands) {
-			CommandService.instance().registerDeclaration(command.declaration);
-			CommandService.instance().registerRuntime(command.declaration.name, command.runtime());
-		}
-
-		for (const declaration of editorCommandDeclarations) {
-			CommandService.instance().registerDeclaration(declaration);
-		}
+		initializeCommandService(this.store(), Setting.value('env') === 'dev');
 
 		const keymapService = KeymapService.instance();
 		// We only add the commands that appear in the menu because only
@@ -534,6 +506,8 @@ class Application extends BaseApplication {
 			type: 'TAG_UPDATE_ALL',
 			items: tags,
 		});
+
+		await this.setupCustomCss();
 
 		// const masterKeys = await MasterKey.all();
 
@@ -577,17 +551,16 @@ class Application extends BaseApplication {
 			ids: Setting.value('collapsedFolderIds'),
 		});
 
-		// Loads custom Markdown preview styles
-		const cssString = await loadCustomCss(Setting.customCssFilePath(Setting.customCssFilenames.RENDERED_MARKDOWN));
-		this.store().dispatch({
-			type: 'CUSTOM_CSS_APPEND',
-			css: cssString,
-		});
-
 		this.store().dispatch({
 			type: 'NOTE_DEVTOOLS_SET',
 			value: Setting.value('flagOpenDevTools'),
 		});
+
+		// Always disable on Mac for now - and disable too for the few apps that may have the flag enabled.
+		// At present, it only seems to work on Windows.
+		if (shim.isMac()) {
+			Setting.setValue('featureFlag.autoUpdaterServiceEnabled', false);
+		}
 
 		// Note: Auto-update is a misnomer in the code.
 		// The code below only checks, if a new version is available.
@@ -596,7 +569,7 @@ class Application extends BaseApplication {
 			if (shim.isWindows() || shim.isMac()) {
 				const runAutoUpdateCheck = () => {
 					if (Setting.value('autoUpdateEnabled')) {
-						void checkForUpdates(true, bridge().window(), { includePreReleases: Setting.value('autoUpdate.includePreReleases') });
+						void checkForUpdates(true, bridge().mainWindow(), { includePreReleases: Setting.value('autoUpdate.includePreReleases') });
 					}
 				};
 
@@ -617,9 +590,9 @@ class Application extends BaseApplication {
 		}, 1000 * 60 * 60);
 
 		if (Setting.value('startMinimized') && Setting.value('showTrayIcon')) {
-			bridge().window().hide();
+			bridge().mainWindow().hide();
 		} else {
-			bridge().window().show();
+			bridge().mainWindow().show();
 		}
 
 		void ShareService.instance().maintenance();
@@ -659,6 +632,7 @@ class Application extends BaseApplication {
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
 			(action: any) => { this.store().dispatch(action); },
 			(path: string) => bridge().openItem(path),
+			() => this.store().getState().windowId,
 		);
 
 		// Forwards the local event to the global event manager, so that it can
@@ -692,6 +666,15 @@ class Application extends BaseApplication {
 			Setting.setValue('linking.extraAllowedExtensions', newExtensions);
 		});
 
+		window.addEventListener('focus', () => {
+			const currentWindowId = this.store().getState().windowId;
+			this.dispatch({
+				type: 'WINDOW_FOCUS',
+				windowId: 'default',
+				lastWindowId: currentWindowId,
+			});
+		});
+
 		await this.initPluginService();
 
 		this.setupContextMenu();
@@ -709,6 +692,9 @@ class Application extends BaseApplication {
 		eventManager.on(EventName.NoteResourceIndexed, async () => {
 			SearchEngine.instance().scheduleSyncTables();
 		});
+
+		// Used by tests
+		ipcRenderer.send('startup-finished');
 
 		// setTimeout(() => {
 		// 	void populateDatabase(reg.db(), {
